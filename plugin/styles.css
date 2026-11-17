@@ -1,0 +1,5 @@
+.flatten-stats { width: 100%; border-collapse: collapse; margin: 0.5em 0 1em; }
+.flatten-stats th, .flatten-stats td { padding: 4px 10px; text-align: right; border-bottom: 1px solid var(--background-modifier-border); }
+.flatten-stats th:first-child, .flatten-stats td:first-child { text-align: left; }
+.flatten-stats tr.is-selected td { background: var(--background-modifier-hover); font-weight: 600; }
+.flatten-stats tr { cursor: pointer; }

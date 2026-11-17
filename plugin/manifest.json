@@ -1,0 +1,9 @@
+{
+    "id": "flatten-notes",
+    "name": "Flatten Notes",
+    "version": "1.0.0",
+    "minAppVersion": "1.0.0",
+    "description": "Aplatit une note et toutes les notes liees (N niveaux) en un seul Markdown, pour donner du contexte a une IA.",
+    "author": "local",
+    "isDesktopOnly": false
+}
