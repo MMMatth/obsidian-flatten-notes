@@ -14,7 +14,7 @@ Typical use: point it at a hub note (a map of content, an index, a project page)
 1. Start from a note (level 0).
 2. Follow its `[[links]]` to get level 1, then follow the links of those notes for level 2, and so on.
 3. Each note is included only once.
-4. Everything is written in one file: an intro for the LLM (goal, parameters, size estimate), then the notes ordered by level, each one under a `===== Name (niveau N) =====` header.
+4. Everything is written in one file: an intro for the LLM (goal, parameters, size estimate), then the notes ordered by level, each one under a `===== Name (level N) =====` header.
 
 Links are resolved by file name anywhere in the vault, like Obsidian does. Links to notes that do not exist are ignored.
 
@@ -41,12 +41,18 @@ Then in Obsidian: **Settings > Community plugins**, reload the list, and enable 
 ### Use it
 
 1. Open the starting note.
-2. Open the command palette (`Ctrl/Cmd + P`) and run **Flatten the active note and its links** (or right click the note and pick **Aplatir avec les notes liees**).
+2. Open the command palette (`Ctrl/Cmd + P`) and run **Flatten the active note and its links** (or right click the note and pick **Flatten with linked notes**).
 3. Click a row of the table to choose the depth (1 to 6). It shows the number of notes and an estimate of the tokens.
-4. Optional: strip the frontmatter, add or remove the intro block.
-5. Click **Copier** (clipboard), **Enregistrer une note** (creates `flattened/contexte_<note>_<N>niveaux.md` in the vault) or **Les deux**.
+4. Pick the **reply language** (none, English or French): it adds a last line to the intro such as `Always reply in French.`, so the AI answers in that language. Optionally strip the frontmatter or remove the intro block.
+5. Click **Copy** (clipboard), **Save as a note** (creates `flattened/context_<note>_<N>levels.md` in the vault) or **Both**.
 
-The output folder can be changed in the plugin settings (default: `flattened`).
+### Plugin settings
+
+In **Settings > Flatten Notes**:
+
+- **Output folder**: where the note is created (default `flattened`).
+- **Default reply language**: `No instruction` (default), `English` or `French`. Adds a last line at the end of the intro (`Always reply in English.` / `Always reply in French.`).
+- **Intro block**: the text given to the AI (in English by default). Placeholders: `{start}` `{depth}` `{notes}` `{detail}` `{chars}` `{tokens}` `{missing}` `{date}`. The reset button restores the default text. A template you never touched keeps following the default text when the plugin is updated.
 
 ## Use the Python script
 
@@ -61,8 +67,9 @@ python3 scripts/flatten_notes.py "Project Index" --vault ~/MyVault -d 3 --no-fro
 | `start` | name of the starting note, without `.md` |
 | `-d`, `--depth` | levels of links to follow (default 3) |
 | `--vault` | vault root (default: `$OBSIDIAN_VAULT`, or the current folder) |
-| `-o`, `--output` | output file (default: `<vault>/flattened/contexte_<note>_<N>niveaux.md`) |
+| `-o`, `--output` | output file (default: `<vault>/flattened/context_<note>_<N>levels.md`) |
 | `--no-frontmatter` | strip the YAML frontmatter of each note |
+| `--reply-lang` | `none` (default), `en` or `fr`: adds a last line telling the AI which language to answer in |
 | `--no-intro` | do not add the intro block |
 
 You can export `OBSIDIAN_VAULT` once so you do not have to pass `--vault`:
@@ -77,7 +84,7 @@ python3 scripts/flatten_notes.py "Project Index" -d 2
 - Token counts are rough estimates (characters / 4), not a real tokenizer.
 - The generated file is a normal note when it lands in the vault: it contains the wikilinks of all the included notes, so it can show up in search and add backlinks in the graph. Change the output folder (or exclude it from search) if that bothers you.
 - Depth grows fast: on a large vault, 5 levels can pull in hundreds of notes. Check the estimate first.
-- The intro block is written in French. Edit the `INTRO` text in `scripts/flatten_notes.py` and the `INTRO` constant in `plugin/main.js` to change it.
+- The intro block is in English. In the plugin, edit it in the settings. In the script, edit the `INTRO` text at the top of `scripts/flatten_notes.py`.
 
 ## Troubleshooting
 

@@ -1,35 +1,39 @@
 const { Plugin, Modal, Setting, Notice, PluginSettingTab, TFile, normalizePath } = require("obsidian");
 
 const MAX_DEPTH = 6;
-const DEFAULTS = { depth: 3, noFrontmatter: true, intro: true, outputDir: "flattened" };
+const DEFAULTS = { depth: 3, noFrontmatter: true, intro: true, outputDir: "flattened", replyLang: "none", template: "" };
 
-const INTRO = (p) => `# CONTEXTE : base de connaissances a apprendre
+const DEFAULT_INTRO = `# CONTEXT: knowledge base to learn
 
-## But de ce document
-Ce fichier rassemble en un seul document la note **${p.start}** et toutes les notes
-qui lui sont liees (via des [[wikilinks]] Obsidian) sur **${p.depth} niveaux**.
-Ton role : **apprendre et memoriser ces notes** pour t'en servir comme base de
-connaissances personnelle de l'utilisateur. Appuie-toi dessus en priorite pour
-repondre, cite le nom de la note source quand c'est utile, et dis clairement
-quand une information n'est pas dans ces notes plutot que de l'inventer.
+## Purpose of this document
+This file gathers the note **{start}** and every note linked to it (through
+Obsidian [[wikilinks]]) over **{depth} levels** into a single document.
+Your role: **learn and memorize these notes** and use them as the user's
+personal knowledge base. Rely on them first when answering, name the source
+note when it helps, and say clearly when something is not in these notes
+instead of making it up.
 
-## Parametres de cette extraction
-- Note de depart : ${p.start}
-- Profondeur : ${p.depth} niveau(x) de liens
-- Notes incluses : ${p.notes} (${p.detail})
-- Taille : ${p.chars} caracteres, environ ${p.tokens} tokens (estimation : caracteres / 4)
-- Liens vers des notes inexistantes (ignores) : ${p.missing}
-- Genere le : ${p.date}
+## Extraction parameters
+- Starting note: {start}
+- Depth: {depth} level(s) of links
+- Notes included: {notes} ({detail})
+- Size: {chars} characters, about {tokens} tokens (estimate: characters / 4)
+- Links to missing notes (ignored): {missing}
+- Generated on: {date}
 
 ## Structure
-Les notes sont classees par niveau de profondeur (0 = note de depart, 1 = notes
-liees directement, etc.). Chaque note commence par \`===== Nom (niveau N) =====\`
-suivi de son chemin d'origine en commentaire. Une note n'apparait qu'une fois,
-meme si plusieurs notes pointent vers elle.
+Notes are ordered by depth level (0 = starting note, 1 = directly linked
+notes, and so on). Each note starts with \`===== Name (level N) =====\`
+followed by its original path as a comment. A note appears only once, even if
+several notes link to it.`;
 
----
+const REPLY = {
+  none: { name: "No instruction", line: "" },
+  en: { name: "English", line: "Always reply in English." },
+  fr: { name: "French", line: "Always reply in French." },
+};
 
-`;
+const fill = (tpl, vars) => tpl.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
 
 module.exports = class FlattenNotesPlugin extends Plugin {
   async onload() {
@@ -37,7 +41,7 @@ module.exports = class FlattenNotesPlugin extends Plugin {
 
     this.addCommand({
       id: "flatten-active-note",
-      name: "Aplatir la note active et ses liens",
+      name: "Flatten the active note and its links",
       checkCallback: (checking) => {
         const f = this.app.workspace.getActiveFile();
         if (!f || f.extension !== "md") return false;
@@ -50,7 +54,7 @@ module.exports = class FlattenNotesPlugin extends Plugin {
       this.app.workspace.on("file-menu", (menu, file) => {
         if (file instanceof TFile && file.extension === "md") {
           menu.addItem((i) =>
-            i.setTitle("Aplatir avec les notes liees").setIcon("files").onClick(() => new FlattenModal(this.app, this, file).open())
+            i.setTitle("Flatten with linked notes").setIcon("files").onClick(() => new FlattenModal(this.app, this, file).open())
           );
         }
       })
@@ -60,6 +64,10 @@ module.exports = class FlattenNotesPlugin extends Plugin {
   }
 
   saveSettings() { return this.saveData(this.settings); }
+
+  template() {
+    return this.settings.template || DEFAULT_INTRO;
+  }
 
   collect(start, depth) {
     const seen = new Set([start.path]);
@@ -97,18 +105,20 @@ module.exports = class FlattenNotesPlugin extends Plugin {
     for (const { file, level } of list) {
       let text = await this.app.vault.cachedRead(file);
       if (noFrontmatter) text = text.replace(/^---\n[\s\S]*?\n---\n/, "");
-      parts.push(`\n\n# ===== ${file.basename} (niveau ${level}) =====\n<!-- ${file.path} -->\n\n${text.trim()}\n`);
+      parts.push(`\n\n# ===== ${file.basename} (level ${level}) =====\n<!-- ${file.path} -->\n\n${text.trim()}\n`);
     }
     const body = parts.join("").replace(/^\s+/, "");
     if (!intro) return { text: body, notes: list.length };
     const counts = {};
     list.forEach((x) => (counts[x.level] = (counts[x.level] || 0) + 1));
-    const detail = Object.keys(counts).map((k) => `niveau ${k} : ${counts[k]}`).join(", ");
-    const head = INTRO({
+    const detail = Object.keys(counts).map((k) => `level ${k}: ${counts[k]}`).join(", ");
+    const text = fill(this.template(), {
       start: start.basename, depth, notes: list.length, detail,
       chars: body.length, tokens: Math.round(body.length / 4), missing,
       date: new Date().toISOString().slice(0, 10),
     });
+    const reply = (REPLY[this.settings.replyLang] || REPLY.none).line;
+    const head = text.trimEnd() + (reply ? `\n\n${reply}` : "") + "\n\n---\n\n";
     return { text: head + body, notes: list.length };
   }
 
@@ -116,7 +126,7 @@ module.exports = class FlattenNotesPlugin extends Plugin {
     const dir = normalizePath(this.settings.outputDir || "flattened");
     if (!(await this.app.vault.adapter.exists(dir))) await this.app.vault.createFolder(dir);
     const safe = name.replace(/[\\/:*?"<>|]/g, "_");
-    const path = normalizePath(`${dir}/contexte_${safe}_${depth}niveaux.md`);
+    const path = normalizePath(`${dir}/context_${safe}_${depth}levels.md`);
     const existing = this.app.vault.getAbstractFileByPath(path);
     if (existing instanceof TFile) await this.app.vault.modify(existing, text);
     else await this.app.vault.create(path, text);
@@ -134,35 +144,42 @@ class FlattenModal extends Modal {
 
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: `Aplatir : ${this.file.basename}` });
+    contentEl.createEl("h3", { text: `Flatten: ${this.file.basename}` });
     this.rows = this.plugin.stats(this.file);
 
-    contentEl.createEl("p", { text: "Clique une ligne pour choisir la profondeur (estimation : taille des fichiers / 4)." });
+    contentEl.createEl("p", { text: "Click a row to choose the depth (estimate: file size / 4)." });
     const table = contentEl.createEl("table", { cls: "flatten-stats" });
     const head = table.createEl("tr");
-    ["Niveaux", "Notes", "Tokens (~)"].forEach((t) => head.createEl("th", { text: t }));
+    ["Levels", "Notes", "Tokens (~)"].forEach((t) => head.createEl("th", { text: t }));
     this.trs = {};
     for (const r of this.rows) {
       const tr = table.createEl("tr");
       tr.createEl("td", { text: String(r.depth) });
       tr.createEl("td", { text: String(r.notes) });
-      tr.createEl("td", { text: r.tokens.toLocaleString("fr-FR") });
+      tr.createEl("td", { text: r.tokens.toLocaleString("en-US") });
       tr.onclick = () => this.select(r.depth);
       this.trs[r.depth] = tr;
     }
     this.select(Math.min(this.s.depth, MAX_DEPTH));
 
-    new Setting(contentEl).setName("Sans frontmatter").addToggle((t) =>
+    new Setting(contentEl)
+      .setName("Reply language")
+      .setDesc("Adds a last line to the prompt telling the AI which language to answer in.")
+      .addDropdown((d) => {
+        Object.keys(REPLY).forEach((k) => d.addOption(k, REPLY[k].name));
+        d.setValue(this.s.replyLang).onChange(async (v) => { this.s.replyLang = v; await this.plugin.saveSettings(); });
+      });
+    new Setting(contentEl).setName("Strip frontmatter").addToggle((t) =>
       t.setValue(this.s.noFrontmatter).onChange(async (v) => { this.s.noFrontmatter = v; await this.plugin.saveSettings(); })
     );
-    new Setting(contentEl).setName("Ajouter l'introduction (but, parametres, estimations)").addToggle((t) =>
+    new Setting(contentEl).setName("Add the intro block (goal, parameters, estimates)").addToggle((t) =>
       t.setValue(this.s.intro).onChange(async (v) => { this.s.intro = v; await this.plugin.saveSettings(); })
     );
 
     const buttons = new Setting(contentEl);
-    buttons.addButton((b) => b.setButtonText("Copier").setCta().onClick(() => this.run("copy")));
-    buttons.addButton((b) => b.setButtonText("Enregistrer une note").onClick(() => this.run("file")));
-    buttons.addButton((b) => b.setButtonText("Les deux").onClick(() => this.run("both")));
+    buttons.addButton((b) => b.setButtonText("Copy").setCta().onClick(() => this.run("copy")));
+    buttons.addButton((b) => b.setButtonText("Save as a note").onClick(() => this.run("file")));
+    buttons.addButton((b) => b.setButtonText("Both").onClick(() => this.run("both")));
   }
 
   select(depth) {
@@ -178,17 +195,17 @@ class FlattenModal extends Modal {
       const msgs = [];
       if (mode === "copy" || mode === "both") {
         await navigator.clipboard.writeText(text);
-        msgs.push("copie dans le presse-papier");
+        msgs.push("copied to the clipboard");
       }
       if (mode === "file" || mode === "both") {
         const p = await this.plugin.saveToVault(text, this.file.basename, this.s.depth);
-        msgs.push(`note creee : ${p}`);
+        msgs.push(`note created: ${p}`);
       }
-      new Notice(`${notes} notes (~${Math.round(text.length / 4).toLocaleString("fr-FR")} tokens) : ${msgs.join(" et ")}`, 8000);
+      new Notice(`${notes} notes (~${Math.round(text.length / 4).toLocaleString("en-US")} tokens): ${msgs.join(" and ")}`, 8000);
       this.close();
     } catch (e) {
       console.error(e);
-      new Notice("Flatten Notes : erreur, voir la console (" + e.message + ")");
+      new Notice("Flatten Notes: error, see the console (" + e.message + ")");
     }
   }
 
@@ -197,17 +214,49 @@ class FlattenModal extends Modal {
 
 class FlattenSettingTab extends PluginSettingTab {
   constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
+
   display() {
     const { containerEl } = this;
+    const settings = this.plugin.settings;
     containerEl.empty();
+
     new Setting(containerEl)
-      .setName("Dossier de sortie (dans le vault)")
-      .setDesc("Dossier du vault ou la note aplatie est creee. Par defaut : +")
+      .setName("Output folder (inside the vault)")
+      .setDesc("Vault folder where the flattened note is created. Default: +")
       .addText((t) =>
-        t.setPlaceholder("flattened").setValue(this.plugin.settings.outputDir).onChange(async (v) => {
-          this.plugin.settings.outputDir = v.trim();
+        t.setPlaceholder("flattened").setValue(settings.outputDir).onChange(async (v) => {
+          settings.outputDir = v.trim();
           await this.plugin.saveSettings();
         })
       );
+
+    new Setting(containerEl)
+      .setName("Default reply language")
+      .setDesc("Adds a last line at the end of the intro, e.g. \"Always reply in French.\" Can also be changed in the window.")
+      .addDropdown((d) => {
+        Object.keys(REPLY).forEach((k) => d.addOption(k, REPLY[k].name));
+        d.setValue(settings.replyLang).onChange(async (v) => { settings.replyLang = v; await this.plugin.saveSettings(); });
+      });
+
+    const setting = new Setting(containerEl)
+      .setName("Intro block (the context given to the AI)")
+      .setDesc("Placeholders: {start} {depth} {notes} {detail} {chars} {tokens} {missing} {date}")
+      .setClass("flatten-template-setting");
+    let area;
+    setting.addTextArea((ta) => {
+      area = ta;
+      ta.setValue(this.plugin.template()).onChange(async (v) => {
+        settings.template = v === DEFAULT_INTRO ? "" : v;
+        await this.plugin.saveSettings();
+      });
+      ta.inputEl.addClass("flatten-template");
+    });
+    setting.addExtraButton((b) =>
+      b.setIcon("reset").setTooltip("Reset to the default text").onClick(async () => {
+        settings.template = "";
+        await this.plugin.saveSettings();
+        area.setValue(DEFAULT_INTRO);
+      })
+    );
   }
 }
